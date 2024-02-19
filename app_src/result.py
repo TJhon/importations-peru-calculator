@@ -130,7 +130,7 @@ class Result(BaseModel):
             + desconsolidation
             + transport_local
             + self.freight
-            # + self.insurage
+            + self.insurage
         )
 
         self.desconsolidation = desconsolidation
