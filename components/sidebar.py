@@ -70,3 +70,48 @@ def other_parameters():
         "operating_cost": operating_cost,
         "tc": tc,
     }
+
+
+from components.summary import query_df
+import sqlite3
+
+
+def delete_row(query):
+    conn = sqlite3.connect("./data/clients.sqlite")
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    tables = cursor.fetchall()
+
+    for table in tables:
+        name_table = table[0]
+        query_table = f"Delete from {name_table} {query}"
+        cursor.execute(query_table)
+        conn.commit()
+    conn.close()
+
+
+def delete():
+    clients = query_df(
+        "Select distinct client_name from clientpi ORDER BY created_at DESC;"
+    )["client_name"].values
+
+    with st.expander("Eliminar Producto"):
+        client_ref = st.selectbox("Cliente/Usuario", clients, key="product")
+        item = query_df(
+            f"""
+            select hs_code from clientpi where client_name = '{client_ref}'
+            """
+        )["hs_code"].unique()
+
+        delete_item = st.selectbox("Producto", item)
+
+        if st.button("Eliminar Item"):
+            delete_row(
+                f"where client_name = '{client_ref}' and hs_code = '{delete_item}'"
+            )
+
+    with st.expander("Eliminar Cliente"):
+        st.selectbox("Cliente/Usuario", clients, key="client")
+        if st.button("Eliminar Informacion de cliente"):
+            delete_row(f"where client_name = '{client_ref}'")

@@ -17,12 +17,15 @@ def query_df(
 
 
 def summary_imports(other):
+    data = query_df("select * from clientpi")
+    if len(data) < 1:
+        st.stop()
 
     st.header("Summary / Resumen")
 
-    clients = query_df("Select distinct client_name from clientpi")[
-        "client_name"
-    ].values
+    clients = query_df(
+        "Select distinct client_name, created_at from clientpi ORDER BY created_at DESC;"
+    )["client_name"].values
 
     # clients = query_df("clientpi", "distinct client_name")["client_name"].values
 
@@ -53,6 +56,7 @@ def summary_imports(other):
         where client_name = '{client_select}'
         """
     )
+    taxes_df["total_taxes1"] = taxes_df["total_taxes"] + taxes_df["insurage"]
 
     # st.write('<hr style="border: 1px solid;">', unsafe_allow_html=True)
 
@@ -63,6 +67,75 @@ def summary_imports(other):
 
     real_total_cif = real_fob["cif"].sum()
     real_total_fob = real_fob["fob"].sum()
+
+    real_fob1 = real_fob[["hs_code", "ammount", "price_unit", "fob"]]
+    real_taxes1 = real_taxes[["hs_code", "total_taxes1"]].rename(
+        columns={"total_taxes1": "real_taxes"}
+    )
+    fake_taxes1 = fake_taxes[["hs_code", "total_taxes1"]].rename(
+        columns={"total_taxes1": "fake_taxes"}
+    )
+
+    def cal_logistic_no_relation(values: dict):
+        elements = list(values.keys())
+        total = 0
+        for element in elements:
+            if element != "tc":
+                total += values[element]
+        return total
+
+    logistic_no_relation = cal_logistic_no_relation(other)
+
+    summary_df = (
+        real_fob1.merge(real_taxes1, on="hs_code")
+        # .merge(fake_taxes1, on="hs_code")
+        .merge(logistic_df[["hs_code", "total_logistic"]], on="hs_code")
+    )
+
+    total_ammount = real_fob1["ammount"].sum()
+
+    summary_df["logistic_fixed"] = (
+        logistic_no_relation / total_ammount * summary_df["ammount"]
+    )
+
+    summary_df["total_value"] = (
+        summary_df["logistic_fixed"] + summary_df["total_logistic"] + summary_df["fob"]
+    )
+    summary_df["total_with_real_taxes"] = (
+        summary_df["total_value"] + summary_df["real_taxes"]
+    )
+    summary_df["cost_unit_real"] = (
+        summary_df["total_with_real_taxes"] / summary_df["ammount"]
+    )
+
+    cols_show = ["hs_code", "ammount", "price_unit", "fob", "cost_unit_real"]
+    if len(fake_taxes) < 1:
+        fake = False
+        diff_taxes = None
+        diff_insurage = None
+        total_diff = None
+
+    if len(fake_taxes) > 0:
+        summary_df = summary_df.merge(fake_taxes1, on="hs_code", how="left")
+        # st.dataframe(summary_df)
+
+        summary_df["total_with_fake_taxes"] = (
+            summary_df["total_value"] + summary_df["fake_taxes"]
+        )
+        summary_df["cost_unit_with_reduced_price"] = (
+            summary_df["total_with_fake_taxes"] / summary_df["ammount"]
+        )
+        cols_show += ["cost_unit_with_reduced_price"]
+
+    rename = {
+        "hs_code": "HS code / Product",
+        "ammount": "Cantidad",
+        "price_unit": "Price Origen (China)",
+        "fob": "Valor FOB",
+        "cost_unit_real": "Costo Unitario (Declarion Correcta)",
+        "cost_unit_with_reduced_price": "Costo Unitario (Declarion Rebajada)",
+    }
+    # a = pd.concat((real_fob1, real_taxes1, fake_taxes1), axis=0, ignore_index=True)
 
     logistic_relation = logistic_df[["freight", "total_logistic"]].sum().round(2)
 
@@ -79,22 +152,14 @@ def summary_imports(other):
     tax_real = real_taxes[col_taxes].sum().round(2)
     tax_fake = fake_taxes[col_taxes].sum().round(2)
 
-    def cal_logistic_no_relation(values: dict):
-        elements = list(values.keys())
-        total = 0
-        for element in elements:
-            if element != "tc":
-                total += values[element]
-        return total
-
-    logistic_no_relation = cal_logistic_no_relation(other)
-
     total_logistic = logistic_relation["total_logistic"] + logistic_no_relation
     total_real_taxes = tax_real["total_taxes"]
     total_real_insurage = tax_real["insurage"]
     total_fake_taxes = tax_fake["total_taxes"]
     total_fake_insurage = tax_fake["insurage"]
-    total_cost_importation = total_logistic + real_total_fob + total_real_taxes
+    total_cost_importation = round(
+        total_logistic + real_total_fob + total_real_taxes, 2
+    )
 
     diff_taxes = total_real_taxes - total_fake_taxes
     diff_taxes = round(diff_taxes, 2)
@@ -104,34 +169,41 @@ def summary_imports(other):
 
     total_diff = diff_taxes + diff_insurage
 
-    fake = True
-    if len(fake_taxes) < 1:
-        fake = False
-        diff_taxes = None
-        diff_insurage = None
-        total_diff = None
-
-    st.metric("Costos de importacion Total", total_cost_importation, total_diff)
+    st.metric(
+        "Costos de importacion Total", total_cost_importation, -total_diff, "inverse"
+    )
     st.divider()
 
     cm1, cm2, cm3 = st.columns(3)
-    cm11, cm22, cm33 = st.columns(3)
 
     cm1.subheader("Valor")
     cm1.metric("Total FOB", real_total_fob)
     cm1.metric("Total CIF", real_total_cif)
 
     cm2.subheader("Taxes")
-    cm2.metric("Total Taxes / Impuestos Totales", total_real_taxes, diff_taxes)
+    cm2.metric(
+        "Total Taxes / Impuestos Totales", total_real_taxes, -diff_taxes, "inverse"
+    )
 
     cm3.subheader("Logistic")
     cm3.metric("Total Logistic Costs", total_logistic)
     cm3.metric(
         "Logistica Relacionada a la Carga",
         logistic_relation["total_logistic"],
-        diff_insurage,
+        -diff_insurage,
+        "inverse",
     )
     cm3.metric("Logistica No Relacionada", logistic_no_relation)
+
+    st.subheader("Costos Unitarios")
+    st.dataframe(
+        summary_df[cols_show]
+        .rename(columns=rename)
+        .round(3)
+        .set_index("HS code / Product")
+        .T,
+        use_container_width=True,
+    )
 
     st.subheader("Details / Detalles")
 
@@ -154,5 +226,3 @@ def summary_imports(other):
     with st.expander("Logistic Costs / Costos logisticos"):
         st.subheader("`Costos Relacionados`")
         st.dataframe(logistic_df)
-
-    # real_taxes_v = taxes_values_df.

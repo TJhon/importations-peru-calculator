@@ -2,9 +2,9 @@ import streamlit as st
 
 
 from app_src.taxes_values import default_taxes
-from components.sidebar import taxes, cost_volumen, other_parameters
+from components.sidebar import taxes, cost_volumen, other_parameters, delete
 from components.input_form import user_input
-from components.summary import summary_imports
+from components.summary import summary_imports, query_df
 
 # Insert Data
 st.title("Calculador de importaciones")
@@ -23,6 +23,10 @@ with register_tab:
             tax = taxes(**default_taxes)
         volumen = cost_volumen()
         other = other_parameters()
+        st.button("Refresh", key="default")
+
+        st.title("Eliminar")
+        delete()
 
     from data_client.client import (
         ClientPI,
@@ -50,20 +54,34 @@ with register_tab:
             valid_number(user.get("price_unit"), "`Precio unitario`")
             valid_number(user.get("cbm"), "`Volumen del producto (CBM)`")
             valid_number(user.get("ammount"), "`Cantidad del producto`")
+            name = user.get("client_name")
+            hs = user.get("hs_code")
+            exists = []
+            try:
+                exists = query_df(
+                    f"select * from clientpi where client_name = '{name}' and hs_code = '{hs}'"
+                )
+            except:
+                pass
+            # st.dataframe(exists)
+            if len(exists) > 0:
+                st.warning(
+                    "Ya esta registrado el hscode para este usuario, intente cambiar el hs_code o en agregar un nombre del producto"
+                )
+                st.stop()
 
         results = [
             Result(**user, **tax, **volumen, **other).run_all() for user in user_values
         ]
-        st.write(results)
+        # st.write(results)
         user = [add_data(result.model_dump(), ClientPI) for result in results]
         taxes_result = [
             add_data(result.model_dump(), ClientPITaxes) for result in results
         ]
-        taxes_result = [
-            add_data(result.model_dump(), TaxesValues) for result in results
-        ]
+
         result = results[0]
         logistic = add_data(result.model_dump(), LogisticCost)
+        values_taxes = add_data(result.model_dump(), TaxesValues)
 
         st.success("Registro Completo")
 
