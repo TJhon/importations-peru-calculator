@@ -1,0 +1,16 @@
+name: Visitar Aplicación Streamlit
+
+on:
+  schedule:
+    - cron: '0 19 * * *'  # Ejecutar todos los días a las 12:00 UTC
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Realizar solicitud HTTP
+      uses: wei/pull-request-action@v2
+      with:
+        endpoint: 'https://imporatations-peru-calculator.streamlit.app/'  # Reemplazar con la URL de tu aplicación
+        method: 'GET'
